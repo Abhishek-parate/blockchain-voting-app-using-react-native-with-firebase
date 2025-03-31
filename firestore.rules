@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Users can read their own profile
+      // Admins can read any user profile
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      
+      // Users can only create their own profile during authentication
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Users can update their own profile
+      // Admins can update any user profile
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      
+      // No one can delete user profiles for data integrity
+      allow delete: if false;
+    }
+    
+    // Elections collection
+    match /elections/{electionId} {
+      // Any authenticated user can read elections
+      allow read: if isAuthenticated();
+      
+      // Only admins can create elections
+      allow create: if isAdmin();
+      
+      // Only admins can update elections
+      // Exception: voters array can be updated when a user casts a vote (handled by server code)
+      allow update: if isAdmin();
+      
+      // Only admins can delete elections
+      allow delete: if isAdmin();
+    }
+    
+    // Transactions collection (vote records)
+    match /transactions/{transactionId} {
+      // Any authenticated user can read transactions
+      allow read: if isAuthenticated();
+      
+      // Any authenticated user can create a transaction (handled by server code)
+      allow create: if isAuthenticated();
+      
+      // No one can update or delete transactions for blockchain integrity
+      allow update, delete: if false;
+    }
+    
+    // Blockchain collection
+    match /blockchain/{blockId} {
+      // Any authenticated user can read blockchain
+      allow read: if isAuthenticated();
+      
+      // Only authenticated users can create/update blockchain (handled by server code)
+      allow create, update: if isAuthenticated();
+      
+      // No one can delete blockchain blocks for integrity
+      allow delete: if false;
+    }
+  }
+}

@@ -1,18 +1,10 @@
-utils/firebase.ts
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as firebaseSignOut, User } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore';
+import { ENV } from './env';
 
-// Your Firebase configuration
-// Replace with your actual Firebase config values
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+// Firebase configuration from environment variables
+const firebaseConfig = ENV.firebaseConfig;
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -184,6 +176,46 @@ export const castVote = async (electionId: string, candidateId: number, voterId:
     
     return { success: true, transactionId: voteTransactionRef.id };
   } catch (error: any) {
+    return { error: error.message };
+  }
+};
+
+// Initialize admin account if it doesn't exist
+export const initializeAdminAccount = async () => {
+  try {
+    if (ENV.app.environment === 'development') {
+      // Check if admin account already exists
+      const adminEmail = ENV.admin.email;
+      const adminPassword = ENV.admin.defaultPassword;
+      
+      // Try to sign in as admin
+      const signInResult = await signIn(adminEmail, adminPassword);
+      
+      if (signInResult.error && signInResult.error.includes('user-not-found')) {
+        // Admin account doesn't exist, create it
+        const signUpResult = await signUp(adminEmail, adminPassword, 'Administrator', true);
+        
+        if (signUpResult.user) {
+          console.log('Admin account created successfully');
+          return { success: true, message: 'Admin account created' };
+        } else {
+          console.error('Failed to create admin account:', signUpResult.error);
+          return { error: signUpResult.error };
+        }
+      } else if (signInResult.user) {
+        // Admin account exists
+        console.log('Admin account verified');
+        await firebaseSignOut(auth); // Sign out after verification
+        return { success: true, message: 'Admin account verified' };
+      } else {
+        console.error('Error verifying admin account:', signInResult.error);
+        return { error: signInResult.error };
+      }
+    }
+    
+    return { success: true, message: 'Admin initialization skipped in non-development environment' };
+  } catch (error: any) {
+    console.error('Error initializing admin account:', error);
     return { error: error.message };
   }
 };
