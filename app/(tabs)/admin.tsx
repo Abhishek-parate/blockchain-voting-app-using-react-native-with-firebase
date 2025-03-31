@@ -1,5 +1,3 @@
-// app/(tabs)/admin.tsx
-
 import React, { useEffect, useState } from 'react';
 import { 
   View, 
@@ -18,13 +16,20 @@ import { getElections } from '../../utils/firebase';
 import { verifyBlockchain } from '../../utils/blockchain';
 
 // Types
+interface Candidate {
+  id: number;
+  name: string;
+  info: string;
+  voteCount: number;
+}
+
 interface Election {
   id: string;
   title: string;
   description: string;
   startDate: any;
   endDate: any;
-  candidates: any[];
+  candidates: any; // Changed from array to any to support both formats
   voters: string[];
   isActive: boolean;
   createdBy: string;
@@ -90,11 +95,30 @@ export default function AdminScreen() {
     return true;
   });
 
+  // Helper function to get candidate count safely
+  const getCandidateCount = (candidates: any): number => {
+    if (!candidates) return 0;
+    
+    if (Array.isArray(candidates)) {
+      return candidates.length;
+    }
+    
+    if (typeof candidates === 'object') {
+      return Object.keys(candidates).length;
+    }
+    
+    return 0;
+  };
+
   // Admin view for election card
   const renderElectionItem = (election: Election) => {
     const now = new Date();
-    const startDate = election.startDate.toDate();
-    const endDate = election.endDate.toDate();
+    const startDate = election.startDate?.toDate();
+    const endDate = election.endDate?.toDate();
+    
+    if (!startDate || !endDate) {
+      return null; // Skip if dates are invalid
+    }
     
     const hasStarted = startDate <= now;
     const hasEnded = endDate < now;
@@ -109,6 +133,9 @@ export default function AdminScreen() {
       status = 'Ended';
       statusColor = theme.colors.error;
     }
+    
+    const candidateCount = getCandidateCount(election.candidates);
+    const voterCount = election.voters?.length || 0;
     
     return (
       <Card key={election.id} containerStyle={[styles.card, { backgroundColor: theme.colors.white }]}>
@@ -127,12 +154,12 @@ export default function AdminScreen() {
         
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{election.candidates.length}</Text>
+            <Text style={styles.statValue}>{candidateCount}</Text>
             <Text style={styles.statLabel}>Candidates</Text>
           </View>
           
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{election.voters.length}</Text>
+            <Text style={styles.statValue}>{voterCount}</Text>
             <Text style={styles.statLabel}>Votes</Text>
           </View>
           

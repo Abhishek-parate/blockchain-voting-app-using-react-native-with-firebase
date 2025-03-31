@@ -1,5 +1,3 @@
-// app/(tabs)/elections.tsx
-
 import React, { useEffect, useState } from 'react';
 import { 
   View, 
@@ -31,12 +29,14 @@ interface Election {
 
 export default function ElectionsScreen() {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const [elections, setElections] = useState<Election[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState(0);
+  
+  const isAdmin = userProfile?.isAdmin === true;
   
   const fetchElections = async () => {
     setLoading(true);
@@ -75,8 +75,12 @@ export default function ElectionsScreen() {
       return matchesSearch;
     } else if (activeTab === 1) { // Active elections
       return matchesSearch && election.isActive;
-    } else if (activeTab === 2) { // My voted elections
-      return matchesSearch && election.voters.includes(user?.uid || '');
+    } else if (activeTab === 2) { // My voted elections or created elections for admin
+      if (isAdmin) {
+        return matchesSearch && election.createdBy === user?.uid;
+      } else {
+        return matchesSearch && election.voters.includes(user?.uid || '');
+      }
     }
     
     return matchesSearch;
@@ -93,9 +97,14 @@ export default function ElectionsScreen() {
       <Card containerStyle={[styles.card, { backgroundColor: theme.colors.white }]}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>{election.title}</Text>
-          {hasVoted && (
+          {hasVoted && !isAdmin && (
             <View style={[styles.votedBadge, { backgroundColor: theme.colors.success }]}>
               <Text style={styles.votedText}>Voted</Text>
+            </View>
+          )}
+          {isAdmin && (
+            <View style={[styles.votedBadge, { backgroundColor: theme.colors.primary }]}>
+              <Text style={styles.votedText}>Admin</Text>
             </View>
           )}
         </View>
@@ -156,34 +165,86 @@ export default function ElectionsScreen() {
             }}
             titleStyle={{ color: theme.colors.primary }}
             containerStyle={{ flex: 1, marginRight: 8 }}
-            onPress={() => router.push(`/election/${election.id}/details`)}
+            onPress={() => router.push(`/election/${election.id}`)}
           />
           
-          <Button
-            title={hasVoted ? "Results" : isEnded ? "Ended" : "Vote Now"}
-            disabled={!isActive || (isEnded && !hasVoted)}
-            buttonStyle={{
-              backgroundColor: hasVoted
-                ? theme.colors.secondary
-                : isEnded
-                ? theme.colors.grey3
-                : theme.colors.primary,
-              borderRadius: 10,
-            }}
-            containerStyle={{ flex: 1, marginLeft: 8 }}
-            onPress={() => router.push(
-              hasVoted
-                ? `/election/${election.id}/results`
-                : `/election/${election.id}`
-            )}
-          />
+          {isAdmin ? (
+            // Admin view button
+            <Button
+              title="View as Admin"
+              buttonStyle={{
+                backgroundColor: theme.colors.secondary,
+                borderRadius: 10,
+              }}
+              containerStyle={{ flex: 1, marginLeft: 8 }}
+              onPress={() => router.push(`/election/${election.id}`)}
+              icon={
+                <Ionicons
+                  name="eye-outline"
+                  size={18}
+                  color="white"
+                  style={{ marginRight: 8 }}
+                />
+              }
+            />
+          ) : (
+            // Regular user button
+            <Button
+              title={hasVoted ? "Results" : isEnded ? "Ended" : "Vote Now"}
+              disabled={!isActive || (isEnded && !hasVoted)}
+              buttonStyle={{
+                backgroundColor: hasVoted
+                  ? theme.colors.secondary
+                  : isEnded
+                  ? theme.colors.grey3
+                  : theme.colors.primary,
+                borderRadius: 10,
+              }}
+              containerStyle={{ flex: 1, marginLeft: 8 }}
+              onPress={() => router.push(
+                hasVoted
+                  ? `/election/${election.id}/results`
+                  : `/election/${election.id}`
+              )}
+            />
+          )}
         </View>
+        
+        {/* Always show results button for admins */}
+        {isAdmin && (
+          <Button
+            title="View Results"
+            buttonStyle={{
+              backgroundColor: theme.colors.primary,
+              borderRadius: 10,
+              marginTop: 10,
+            }}
+            onPress={() => router.push(`/election/${election.id}/results`)}
+            icon={
+              <Ionicons
+                name="stats-chart-outline"
+                size={18}
+                color="white"
+                style={{ marginRight: 8 }}
+              />
+            }
+          />
+        )}
       </Card>
     );
   };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      {isAdmin && (
+        <View style={[styles.adminBanner, { backgroundColor: theme.colors.primary }]}>
+          <Ionicons name="information-circle" size={22} color="white" />
+          <Text style={styles.adminBannerText}>
+            You're viewing elections as an administrator
+          </Text>
+        </View>
+      )}
+      
       <SearchBar
         placeholder="Search elections..."
         onChangeText={handleSearch}
@@ -215,7 +276,7 @@ export default function ElectionsScreen() {
           titleStyle={{ color: activeTab === 1 ? theme.colors.primary : theme.colors.grey3 }}
         />
         <Tab.Item
-          title="Voted"
+          title={isAdmin ? "Created" : "Voted"}
           titleStyle={{ color: activeTab === 2 ? theme.colors.primary : theme.colors.grey3 }}
         />
       </Tab>
@@ -250,6 +311,8 @@ export default function ElectionsScreen() {
                     ? "No elections found"
                     : tabIndex === 1
                     ? "No active elections at the moment"
+                    : isAdmin
+                    ? "You haven't created any elections yet"
                     : "You haven't voted in any elections yet"}
                 </Text>
               </View>
@@ -257,6 +320,15 @@ export default function ElectionsScreen() {
           </TabView.Item>
         ))}
       </TabView>
+      
+      {isAdmin && (
+        <TouchableOpacity 
+          style={[styles.fabButton, { backgroundColor: theme.colors.primary }]}
+          onPress={() => router.push('/admin/create-election')}
+        >
+          <Ionicons name="add" size={30} color="white" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -264,6 +336,17 @@ export default function ElectionsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  adminBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    paddingHorizontal: 15,
+  },
+  adminBannerText: {
+    color: 'white',
+    marginLeft: 10,
+    fontWeight: '500',
   },
   searchBarContainer: {
     borderTopWidth: 0,
@@ -286,7 +369,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: 10,
-    paddingBottom: 50,
+    paddingBottom: 80, // Extra space for FAB button
   },
   emptyContainer: {
     flex: 1,
@@ -344,5 +427,20 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  fabButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
   },
 });

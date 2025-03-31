@@ -116,7 +116,7 @@ export default function ProfileScreen() {
       </View>
 
       <Card containerStyle={[styles.card, { backgroundColor: theme.colors.white }]}>
-        <Card.Title>Account Settings</Card.Title>
+        <Card.Title style={styles.detailText}>Account Settings</Card.Title>
         <Card.Divider />
         
         <ListItem bottomDivider>
@@ -149,7 +149,7 @@ export default function ProfileScreen() {
       </Card>
 
       <Card containerStyle={[styles.card, { backgroundColor: theme.colors.white }]}>
-        <Card.Title>Voting History</Card.Title>
+        <Card.Title style={styles.detailText}>Voting History</Card.Title>
         <Card.Divider />
         
         {loading ? (
@@ -180,7 +180,7 @@ export default function ProfileScreen() {
       </Card>
 
       <Card containerStyle={[styles.card, { backgroundColor: theme.colors.white }]}>
-        <Card.Title>About</Card.Title>
+        <Card.Title style={styles.detailText}>About</Card.Title>
         <Card.Divider />
         
         <ListItem bottomDivider onPress={() => Alert.alert('About', 'Blockchain Voting System v1.0.0')}>
@@ -259,5 +259,9 @@ const styles = StyleSheet.create({
   signOutButtonContainer: {
     marginHorizontal: 15,
     marginVertical: 25,
+  },
+  detailText: {
+    fontSize: 14,
+    color: '#5E6C84',
   },
 });

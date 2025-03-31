@@ -1,152 +1,114 @@
 // theme/theme.ts
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User } from 'firebase/auth';
-import { auth, getUserProfile } from '../utils/firebase';
-import * as SecureStore from 'expo-secure-store';
 
-interface AuthContextProps {
-  user: User | null;
-  userProfile: UserProfile | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error?: string }>;
-  signUp: (email: string, password: string, name: string) => Promise<{ error?: string }>;
-  signOut: () => Promise<{ error?: string }>;
-}
+import { createTheme } from '@rneui/themed';
 
-export interface UserProfile {
-  uid: string;
-  email: string;
-  name: string;
-  isAdmin: boolean;
-  createdAt: any;
-}
-
-const AuthContext = createContext<AuthContextProps>({
-  user: null,
-  userProfile: null,
-  loading: true,
-  signIn: async () => ({ error: 'Not implemented' }),
-  signUp: async () => ({ error: 'Not implemented' }),
-  signOut: async () => ({ error: 'Not implemented' }),
+export const theme = createTheme({
+  lightColors: {
+    primary: '#3D5AF1',
+    secondary: '#38b6ff',
+    background: '#F8F9FF',
+    white: '#FFFFFF',
+    black: '#2E384D',
+    grey0: '#F8F9FF',
+    grey1: '#EDF1F7',
+    grey2: '#C5CEE0',
+    grey3: '#8F9BB3',
+    grey4: '#5E6C84',
+    grey5: '#2E384D',
+    success: '#00E096',
+    warning: '#FFAA00',
+    error: '#FF3D71',
+    disabled: '#EDF1F7',
+    divider: '#EDF1F7',
+  },
+  darkColors: {
+    primary: '#5073F2',
+    secondary: '#54C7FF',
+    background: '#1A2138',
+    white: '#FFFFFF',
+    black: '#151A30',
+    grey0: '#1A2138',
+    grey1: '#252D42',
+    grey2: '#394056',
+    grey3: '#8F9BB3',
+    grey4: '#B7BED0',
+    grey5: '#EDF1F7',
+    success: '#00E096',
+    warning: '#FFAA00',
+    error: '#FF3D71',
+    disabled: '#394056',
+    divider: '#252D42',
+  },
+  mode: 'light',
+  components: {
+    Button: {
+      raised: true,
+      buttonStyle: {
+        borderRadius: 10,
+        paddingVertical: 12,
+      },
+      containerStyle: {
+        borderRadius: 10,
+      },
+      titleStyle: {
+        fontWeight: 'bold',
+      },
+    },
+    Input: {
+      containerStyle: {
+        paddingHorizontal: 0,
+      },
+      inputContainerStyle: {
+        borderBottomWidth: 0,
+        backgroundColor: 'transparent',
+      },
+      inputStyle: {
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+      },
+      leftIconContainerStyle: {
+        marginLeft: 12,
+        marginRight: 8,
+      },
+      rightIconContainerStyle: {
+        marginRight: 12,
+        marginLeft: 8,
+      },
+      errorStyle: {
+        margin: 5,
+      },
+    },
+    Card: {
+      containerStyle: {
+        borderRadius: 10,
+        padding: 16,
+        marginHorizontal: 0,
+      },
+    },
+    Text: {
+      h1Style: {
+        fontWeight: 'bold',
+        fontSize: 32,
+      },
+      h2Style: {
+        fontWeight: 'bold',
+        fontSize: 28,
+      },
+      h3Style: {
+        fontWeight: 'bold',
+        fontSize: 24,
+      },
+      h4Style: {
+        fontWeight: 'bold',
+        fontSize: 20,
+      },
+    },
+    Divider: {
+      style: {
+        marginVertical: 10,
+      },
+    },
+  },
 });
-
-export const useAuth = () => useContext(AuthContext);
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Listen for auth state changes
-    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
-      setUser(currentUser);
-      
-      if (currentUser) {
-        // Get user profile from Firestore
-        const { profile, error } = await getUserProfile(currentUser.uid);
-        if (profile && !error) {
-          setUserProfile(profile as UserProfile);
-          // Store user info in secure storage
-          await SecureStore.setItemAsync('user', JSON.stringify({
-            uid: currentUser.uid,
-            email: currentUser.email,
-          }));
-        }
-      } else {
-        setUserProfile(null);
-        // Clear user info from secure storage
-        await SecureStore.deleteItemAsync('user');
-      }
-      
-      setLoading(false);
-    });
-
-    // Check for stored user on app load
-    const checkStoredUser = async () => {
-      try {
-        const storedUser = await SecureStore.getItemAsync('user');
-        if (storedUser && !user) {
-          const parsedUser = JSON.parse(storedUser);
-          // User data exists, but we'll wait for Firebase Auth to confirm
-          console.log('Found stored user, waiting for Firebase auth check', parsedUser.uid);
-        }
-      } catch (error) {
-        console.error('Error checking stored user:', error);
-      }
-    };
-
-    checkStoredUser();
-
-    // Cleanup subscription
-    return () => unsubscribe();
-  }, []);
-
-  // Sign in function
-  const signIn = async (email: string, password: string) => {
-    try {
-      setLoading(true);
-      const result = await import('../utils/firebase').then(module => module.signIn(email, password));
-      
-      if (result.error) {
-        return { error: result.error };
-      }
-      
-      // User will be set by the auth state listener
-      return {};
-    } catch (error: any) {
-      return { error: error.message };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Sign up function
-  const signUp = async (email: string, password: string, name: string) => {
-    try {
-      setLoading(true);
-      const result = await import('../utils/firebase').then(module => module.signUp(email, password, name));
-      
-      if (result.error) {
-        return { error: result.error };
-      }
-      
-      // User will be set by the auth state listener
-      return {};
-    } catch (error: any) {
-      return { error: error.message };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Sign out function
-  const signOut = async () => {
-    try {
-      setLoading(true);
-      const result = await import('../utils/firebase').then(module => module.signOut());
-      
-      if (result.error) {
-        return { error: result.error };
-      }
-      
-      // User will be cleared by the auth state listener
-      return {};
-    } catch (error: any) {
-      return { error: error.message };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const value = {
-    user,
-    userProfile,
-    loading,
-    signIn,
-    signUp,
-    signOut,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};

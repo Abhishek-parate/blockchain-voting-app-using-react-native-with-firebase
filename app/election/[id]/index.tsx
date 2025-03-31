@@ -6,17 +6,14 @@ import {
   StyleSheet, 
   ScrollView, 
   TouchableOpacity, 
-  Alert, 
-  ActivityIndicator,
-  Platform
+  ActivityIndicator, 
+  Alert 
 } from 'react-native';
-import { Text, Card, Button, useTheme, Divider, Chip } from '@rneui/themed';
+import { Text, Card, Button, useTheme, Divider } from '@rneui/themed';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../../contexts/AuthContext';
-import { getElectionById, castVote } from '../../../utils/firebase';
-import { recordVoteOnBlockchain, createVoteHash } from '../../../utils/blockchain';
-import * as Haptics from 'expo-haptics';
+import { getElectionById } from '../../../utils/firebase';
+import { getElectionVotes } from '../../../utils/blockchain';
 
 // Types
 interface Candidate {
@@ -32,134 +29,168 @@ interface Election {
   description: string;
   startDate: any;
   endDate: any;
-  candidates: Candidate[];
+  candidates: any; // Changed from Candidate[] to any to handle both array and object formats
   voters: string[];
   isActive: boolean;
 }
 
-export default function VotingScreen() {
+interface VoteRecord {
+  blockHash: string;
+  blockIndex: number;
+  candidateId: number;
+  timestamp: number;
+  voteHash: string;
+}
+
+export default function ResultsScreen() {
   const { theme } = useTheme();
-  const { user } = useAuth();
   const { id: electionId } = useLocalSearchParams<{ id: string }>();
   const [election, setElection] = useState<Election | null>(null);
+  const [voteRecords, setVoteRecords] = useState<VoteRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCandidate, setSelectedCandidate] = useState<number | null>(null);
-  const [votingInProgress, setVotingInProgress] = useState(false);
+  const [blockchainVerified, setBlockchainVerified] = useState(false);
+  const [processedCandidates, setProcessedCandidates] = useState<Candidate[]>([]);
 
   useEffect(() => {
-    const fetchElection = async () => {
+    const fetchElectionData = async () => {
       if (electionId) {
         try {
+          console.log("Fetching election data for ID:", electionId);
+          
+          // Fetch election details from Firebase
           const { election: fetchedElection, error } = await getElectionById(electionId);
+          
+          console.log("Election data result:", fetchedElection ? "Data received" : "No data", 
+                      error ? `Error: ${error}` : "No error");
+          
           if (fetchedElection && !error) {
+            console.log("Election data:", JSON.stringify(fetchedElection, null, 2).substring(0, 200) + "...");
             setElection(fetchedElection as Election);
             
-            // Check if user has already voted
-            if (fetchedElection.voters.includes(user?.uid || '')) {
-              Alert.alert(
-                'Already Voted',
-                'You have already cast your vote in this election.',
-                [
-                  {
-                    text: 'View Results',
-                    onPress: () => router.replace(`/election/${electionId}/results`),
-                  },
-                  {
-                    text: 'Go Back',
-                    onPress: () => router.back(),
-                    style: 'cancel',
-                  },
-                ]
-              );
+            // Process candidates - handle both array and object formats
+            const candidates = processCandidates(fetchedElection.candidates);
+            setProcessedCandidates(candidates);
+            
+            // Fetch blockchain vote records
+            try {
+              const votes = await getElectionVotes(electionId);
+              setVoteRecords(votes);
+              
+              // Verify if blockchain votes match Firebase vote counts
+              const isVerified = verifyVoteCounts(candidates, votes);
+              setBlockchainVerified(isVerified);
+            } catch (blockchainError) {
+              console.error("Error fetching blockchain data:", blockchainError);
             }
           } else {
+            console.error("Could not fetch election:", error);
             Alert.alert('Error', error || 'Could not fetch election details');
             router.back();
           }
         } catch (error) {
-          console.error('Error fetching election:', error);
-          Alert.alert('Error', 'An error occurred while fetching election details');
+          console.error('Error fetching election data:', error);
+          Alert.alert('Error', 'An error occurred while fetching election data');
           router.back();
         } finally {
           setLoading(false);
         }
       }
     };
+  
+    fetchElectionData();
+  }, [electionId]);
 
-    fetchElection();
-  }, [electionId, user]);
-
-  const handleSelectCandidate = (candidateId: number) => {
-    if (Platform.OS === 'ios') {
-      Haptics.selectionAsync();
+  // Process candidates from either array or object format
+  const processCandidates = (candidatesData: any): Candidate[] => {
+    if (!candidatesData) {
+      console.error("No candidates data available");
+      return [];
     }
-    setSelectedCandidate(candidateId);
+    
+    // Check if candidates is an array
+    if (Array.isArray(candidatesData)) {
+      return candidatesData;
+    }
+    
+    // Handle object format with numeric keys
+    if (typeof candidatesData === 'object') {
+      try {
+        const candidateArray: Candidate[] = [];
+        Object.keys(candidatesData).forEach(key => {
+          const candidateId = parseInt(key) + 1; // Convert to 1-based index if needed
+          const candidateData = candidatesData[key];
+          
+          candidateArray.push({
+            id: candidateId,
+            name: candidateData.name || `Candidate ${candidateId}`,
+            info: candidateData.info || '',
+            voteCount: candidateData.voteCount || 0
+          });
+        });
+        return candidateArray;
+      } catch (error) {
+        console.error("Error processing candidates data:", error);
+        return [];
+      }
+    }
+    
+    console.error("Invalid candidates data:", candidatesData);
+    return [];
   };
 
-  const handleCastVote = async () => {
-    if (!selectedCandidate || !election || !user) {
-      Alert.alert('Error', 'Please select a candidate before voting');
-      return;
+  // Verify that blockchain vote counts match Firebase candidate vote counts
+  const verifyVoteCounts = (candidates: Candidate[], votes: VoteRecord[]): boolean => {
+    if (!candidates || candidates.length === 0) {
+      console.error("Invalid candidates data:", candidates);
+      return false;
     }
-
-    setVotingInProgress(true);
-
+    
+    if (!votes || !Array.isArray(votes)) {
+      console.error("Invalid votes data:", votes);
+      return false;
+    }
+    
     try {
-      if (Platform.OS === 'ios') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Count votes by candidate from blockchain records
+      const blockchainVoteCounts = new Map<number, number>();
+      votes.forEach(vote => {
+        const currentCount = blockchainVoteCounts.get(vote.candidateId) || 0;
+        blockchainVoteCounts.set(vote.candidateId, currentCount + 1);
+      });
+      
+      // Compare with Firebase candidate vote counts
+      for (const candidate of candidates) {
+        const blockchainCount = blockchainVoteCounts.get(candidate.id) || 0;
+        if (blockchainCount !== candidate.voteCount) {
+          return false;
+        }
       }
       
-      // Create a vote hash for the blockchain
-      const voteHash = createVoteHash(electionId!, selectedCandidate, user.uid);
-      
-      // Record the vote on the blockchain
-      const blockchainResult = await recordVoteOnBlockchain(
-        electionId!,
-        selectedCandidate,
-        user.uid
-      );
-      
-      if (!blockchainResult.success) {
-        throw new Error(blockchainResult.error || 'Failed to record vote on blockchain');
-      }
-      
-      // Update the vote in Firebase
-      const result = await castVote(
-        electionId!,
-        selectedCandidate,
-        user.uid,
-        voteHash
-      );
-      
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      
-      // Show success message and navigate to results
-      Alert.alert(
-        'Vote Cast Successfully',
-        'Your vote has been securely recorded on the blockchain.',
-        [
-          {
-            text: 'View Results',
-            onPress: () => router.replace(`/election/${electionId}/results`),
-          },
-        ]
-      );
-    } catch (error: any) {
-      console.error('Error casting vote:', error);
-      Alert.alert('Error', error.message || 'An error occurred while casting your vote');
-    } finally {
-      setVotingInProgress(false);
+      return true;
+    } catch (error) {
+      console.error("Error verifying vote counts:", error);
+      return false;
     }
   };
+
+  // Calculate total votes from processed candidates
+  const totalVotes = processedCandidates.reduce((sum, candidate) => sum + candidate.voteCount, 0);
+
+  // Calculate percentage for a candidate
+  const calculatePercentage = (voteCount: number): string => {
+    if (totalVotes === 0) return '0%';
+    return `${((voteCount / totalVotes) * 100).toFixed(1)}%`;
+  };
+
+  // Sort candidates by vote count (descending)
+  const sortedCandidates = [...processedCandidates].sort((a, b) => b.voteCount - a.voteCount);
 
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
         <ActivityIndicator size="large" color={theme.colors.primary} />
         <Text style={{ marginTop: 20, color: theme.colors.grey4 }}>
-          Loading election details...
+          Loading election results...
         </Text>
       </View>
     );
@@ -182,11 +213,15 @@ export default function VotingScreen() {
     );
   }
 
-  // Check if the election is active and not ended
+  // Determine if the election has ended
   const now = new Date();
-  const startDate = election.startDate.toDate();
   const endDate = election.endDate.toDate();
-  const isActive = election.isActive && startDate <= now && endDate >= now;
+  const hasEnded = endDate < now;
+
+  // Find the winner (if election has ended)
+  const winner = hasEnded && sortedCandidates.length > 0 && sortedCandidates[0].voteCount > 0
+    ? sortedCandidates[0]
+    : null;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -198,171 +233,177 @@ export default function VotingScreen() {
           >
             <Ionicons name="arrow-back" size={24} color={theme.colors.black} />
           </TouchableOpacity>
+          <Text h4 style={styles.headerTitle}>Election Results</Text>
+          <View style={{ width: 40 }} />
         </View>
 
-        <View style={styles.electionInfo}>
-          <Text h3 style={{ color: theme.colors.black }}>
-            {election.title}
-          </Text>
-
-          <View style={styles.statusContainer}>
-            {isActive ? (
-              <Chip
-                title="Active"
-                icon={{
-                  name: 'check-circle',
-                  type: 'font-awesome',
-                  size: 16,
-                  color: 'white',
-                }}
-                containerStyle={{ marginVertical: 10 }}
-                buttonStyle={{ backgroundColor: theme.colors.success }}
+        <Card containerStyle={[styles.electionCard, { backgroundColor: theme.colors.white }]}>
+          <Text h4 style={styles.electionTitle}>{election.title}</Text>
+          <Text style={styles.electionDescription}>{election.description}</Text>
+          
+          <View style={styles.statusRow}>
+            <View style={styles.statusItem}>
+              <Ionicons 
+                name={hasEnded ? "checkmark-circle" : "time-outline"} 
+                size={22} 
+                color={hasEnded ? theme.colors.success : theme.colors.warning} 
               />
-            ) : (
-              <Chip
-                title="Inactive"
-                icon={{
-                  name: 'times-circle',
-                  type: 'font-awesome',
-                  size: 16,
-                  color: 'white',
-                }}
-                containerStyle={{ marginVertical: 10 }}
-                buttonStyle={{ backgroundColor: theme.colors.error }}
-              />
-            )}
-          </View>
-
-          <Text style={styles.description}>{election.description}</Text>
-
-          <View style={styles.dateInfo}>
-            <View style={styles.dateItem}>
-              <Ionicons name="calendar-outline" size={16} color={theme.colors.grey4} />
-              <Text style={styles.dateText}>
-                Start: {startDate.toLocaleDateString()} {startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <Text style={[
+                styles.statusText, 
+                { color: hasEnded ? theme.colors.success : theme.colors.warning }
+              ]}>
+                {hasEnded ? "Completed" : "In Progress"}
               </Text>
             </View>
-            <View style={styles.dateItem}>
-              <Ionicons name="time-outline" size={16} color={theme.colors.grey4} />
-              <Text style={styles.dateText}>
-                End: {endDate.toLocaleDateString()} {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            
+            <View style={styles.statusItem}>
+              <Ionicons 
+                name="people-outline" 
+                size={22} 
+                color={theme.colors.primary} 
+              />
+              <Text style={styles.infoText}>
+                {election.voters?.length || 0} Votes
+              </Text>
+            </View>
+            
+            <View style={styles.statusItem}>
+              <Ionicons 
+                name={blockchainVerified ? "shield-checkmark" : "alert-circle"} 
+                size={22} 
+                color={blockchainVerified ? theme.colors.success : theme.colors.error} 
+              />
+              <Text style={[
+                styles.statusText, 
+                { color: blockchainVerified ? theme.colors.success : theme.colors.error }
+              ]}>
+                {blockchainVerified ? "Verified" : "Unverified"}
               </Text>
             </View>
           </View>
-        </View>
+        </Card>
 
-        <Divider style={{ marginVertical: 20 }} />
-
-        <Text h4 style={styles.sectionTitle}>Select a Candidate</Text>
-
-        {!isActive && (
-          <View style={[styles.inactiveWarning, { backgroundColor: theme.colors.error }]}>
-            <Ionicons name="warning-outline" size={22} color="white" />
-            <Text style={styles.inactiveWarningText}>
-              This election is not currently active. Voting is not possible.
-            </Text>
-          </View>
+        {winner && (
+          <Card containerStyle={[styles.winnerCard, { backgroundColor: theme.colors.success }]}>
+            <View style={styles.winnerContent}>
+              <Ionicons name="trophy" size={40} color="white" />
+              <View style={styles.winnerInfo}>
+                <Text style={styles.winnerLabel}>Winner</Text>
+                <Text h4 style={styles.winnerName}>{winner.name}</Text>
+                <Text style={styles.winnerVotes}>
+                  {winner.voteCount} votes ({calculatePercentage(winner.voteCount)})
+                </Text>
+              </View>
+            </View>
+          </Card>
         )}
 
-        {election.candidates.map((candidate) => (
-          <Card
-            key={candidate.id}
-            containerStyle={[
-              styles.candidateCard,
-              selectedCandidate === candidate.id && {
-                borderColor: theme.colors.primary,
-                borderWidth: 2,
-              },
-              { backgroundColor: theme.colors.white }
-            ]}
-          >
-            <TouchableOpacity
-              disabled={!isActive || election.voters.includes(user?.uid || '')}
-              onPress={() => handleSelectCandidate(candidate.id)}
-              style={styles.candidateContent}
-            >
-              <View style={styles.candidateHeader}>
-                <View style={styles.candidateNameContainer}>
-                  {selectedCandidate === candidate.id ? (
-                    <Ionicons name="checkmark-circle" size={28} color={theme.colors.primary} />
-                  ) : (
-                    <Ionicons name="radio-button-off" size={28} color={theme.colors.grey3} />
-                  )}
-                  <Text h4 style={styles.candidateName}>
-                    {candidate.name}
-                  </Text>
+        <Card containerStyle={[styles.resultsCard, { backgroundColor: theme.colors.white }]}>
+          <Card.Title>Results Breakdown</Card.Title>
+          <Card.Divider />
+          
+          {!hasEnded && (
+            <View style={[styles.warningBanner, { backgroundColor: theme.colors.warning }]}>
+              <Ionicons name="information-circle" size={22} color="white" />
+              <Text style={styles.warningText}>
+                Election is still in progress. Results may change.
+              </Text>
+            </View>
+          )}
+          
+          {sortedCandidates.length > 0 ? (
+            sortedCandidates.map((candidate, index) => {
+              const percentage = calculatePercentage(candidate.voteCount);
+              const isWinner = hasEnded && winner?.id === candidate.id;
+              
+              return (
+                <View key={candidate.id || index} style={styles.candidateResult}>
+                  <View style={styles.candidateResultHeader}>
+                    <View style={styles.candidateInfo}>
+                      <Text style={styles.candidateRank}>#{index + 1}</Text>
+                      <Text style={styles.candidateName}>{candidate.name}</Text>
+                      {isWinner && (
+                        <View style={[styles.winnerBadge, { backgroundColor: theme.colors.success }]}>
+                          <Text style={styles.winnerBadgeText}>Winner</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.voteCount}>
+                      {candidate.voteCount} votes ({percentage})
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.progressBarContainer}>
+                    <View 
+                      style={[
+                        styles.progressBar,
+                        { 
+                          backgroundColor: isWinner ? theme.colors.success : theme.colors.primary,
+                          width: `${(candidate.voteCount / (Math.max(...sortedCandidates.map(c => c.voteCount)) || 1)) * 100}%`
+                        }
+                      ]} 
+                    />
+                  </View>
+                  
+                  {index < sortedCandidates.length - 1 && <Divider style={{ marginVertical: 15 }} />}
                 </View>
-              </View>
-              <Text style={styles.candidateInfo}>{candidate.info}</Text>
-            </TouchableOpacity>
-          </Card>
-        ))}
+              );
+            })
+          ) : (
+            <View style={styles.noCandidatesContainer}>
+              <Ionicons name="person-outline" size={40} color={theme.colors.grey3} />
+              <Text style={{ color: theme.colors.grey4, marginTop: 10 }}>
+                No candidate information available
+              </Text>
+            </View>
+          )}
+        </Card>
 
-        <View style={styles.voteButtonContainer}>
+        <Card containerStyle={[styles.blockchainCard, { backgroundColor: theme.colors.white }]}>
+          <Card.Title>Blockchain Verification</Card.Title>
+          <Card.Divider />
+          
+          <View style={styles.blockchainStatus}>
+            <Ionicons 
+              name={blockchainVerified ? "shield-checkmark" : "alert-circle"} 
+              size={30} 
+              color={blockchainVerified ? theme.colors.success : theme.colors.error} 
+            />
+            <Text style={[
+              styles.blockchainStatusText, 
+              { color: blockchainVerified ? theme.colors.success : theme.colors.error }
+            ]}>
+              {blockchainVerified 
+                ? "Blockchain records match the vote count" 
+                : "Warning: Blockchain records do not match vote count"
+              }
+            </Text>
+          </View>
+          
+          <View style={styles.blockchainInfo}>
+            <Text style={styles.blockchainInfoTitle}>Blockchain Records</Text>
+            <Text style={styles.blockchainInfoText}>
+              Total Transactions: {voteRecords.length}
+            </Text>
+          </View>
+          
           <Button
-            title="Cast Your Vote"
-            onPress={handleCastVote}
-            disabled={
-              !isActive ||
-              selectedCandidate === null ||
-              election.voters.includes(user?.uid || '') ||
-              votingInProgress
-            }
-            loading={votingInProgress}
+            title="View Blockchain Transactions"
+            type="outline"
+            buttonStyle={{ borderColor: theme.colors.primary }}
+            titleStyle={{ color: theme.colors.primary }}
+            containerStyle={{ marginTop: 15 }}
             icon={
-              <Ionicons
-                name="checkmark-circle-outline"
-                size={22}
-                color="white"
+              <Ionicons 
+                name="code" 
+                size={20} 
+                color={theme.colors.primary} 
                 style={{ marginRight: 10 }}
               />
             }
-            buttonStyle={[
-              styles.voteButton,
-              {
-                backgroundColor:
-                  !isActive || election.voters.includes(user?.uid || '')
-                    ? theme.colors.grey3
-                    : theme.colors.primary,
-              },
-            ]}
+            onPress={() => Alert.alert('Blockchain Transactions', 'This feature would display detailed blockchain transaction data in a production app.')}
           />
-          
-          {election.voters.includes(user?.uid || '') && (
-            <Button
-              title="View Results"
-              onPress={() => router.push(`/election/${electionId}/results`)}
-              buttonStyle={[
-                styles.resultsButton,
-                { backgroundColor: theme.colors.secondary },
-              ]}
-              icon={
-                <Ionicons
-                  name="stats-chart-outline"
-                  size={22}
-                  color="white"
-                  style={{ marginRight: 10 }}
-                />
-              }
-              containerStyle={{ marginTop: 15 }}
-            />
-          )}
-        </View>
-
-        <View style={styles.securityInfo}>
-          <View style={styles.securityItem}>
-            <Ionicons name="shield-checkmark-outline" size={24} color={theme.colors.success} />
-            <Text style={styles.securityText}>
-              Your vote is secure and anonymous on the blockchain
-            </Text>
-          </View>
-          <View style={styles.securityItem}>
-            <Ionicons name="lock-closed-outline" size={24} color={theme.colors.primary} />
-            <Text style={styles.securityText}>
-              Once cast, your vote cannot be changed
-            </Text>
-          </View>
-        </View>
+        </Card>
       </ScrollView>
     </View>
   );
@@ -373,7 +414,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    padding: 15,
     paddingBottom: 40,
   },
   loadingContainer: {
@@ -390,107 +431,161 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 20,
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
   },
   backButton: {
     padding: 8,
     borderRadius: 20,
     backgroundColor: '#f0f0f0',
   },
-  electionInfo: {
-    marginTop: 10,
+  electionCard: {
+    borderRadius: 10,
+    marginBottom: 15,
   },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  electionTitle: {
+    marginBottom: 10,
   },
-  description: {
-    fontSize: 16,
-    lineHeight: 24,
-    marginTop: 15,
-    color: '#333',
-  },
-  dateInfo: {
-    marginTop: 20,
-  },
-  dateItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  dateText: {
-    marginLeft: 10,
-    fontSize: 14,
+  electionDescription: {
+    marginBottom: 15,
     color: '#5E6C84',
   },
-  sectionTitle: {
-    marginBottom: 15,
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
   },
-  inactiveWarning: {
+  statusItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20,
   },
-  inactiveWarningText: {
-    marginLeft: 10,
-    color: 'white',
-    flex: 1,
+  statusText: {
+    marginLeft: 5,
+    fontWeight: 'bold',
   },
-  candidateCard: {
+  infoText: {
+    marginLeft: 5,
+    color: '#5E6C84',
+  },
+  winnerCard: {
     borderRadius: 10,
     marginBottom: 15,
     padding: 15,
   },
-  candidateContent: {
+  winnerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  winnerInfo: {
+    marginLeft: 20,
+  },
+  winnerLabel: {
+    color: 'white',
+    opacity: 0.8,
+    marginBottom: 5,
+  },
+  winnerName: {
+    color: 'white',
+    marginBottom: 5,
+  },
+  winnerVotes: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  resultsCard: {
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 5,
+    marginBottom: 15,
+  },
+  warningText: {
+    color: 'white',
+    marginLeft: 10,
     flex: 1,
   },
-  candidateHeader: {
+  candidateResult: {
+    marginBottom: 5,
+  },
+  candidateResultHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
   },
-  candidateNameContainer: {
+  candidateInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+  },
+  candidateRank: {
+    fontWeight: 'bold',
+    marginRight: 10,
   },
   candidateName: {
-    marginLeft: 15,
-    fontSize: 18,
+    fontSize: 16,
+    fontWeight: 'bold',
   },
-  candidateInfo: {
-    marginLeft: 43,
-    fontSize: 14,
-    lineHeight: 20,
+  winnerBadge: {
+    marginLeft: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  winnerBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  voteCount: {
     color: '#5E6C84',
   },
-  voteButtonContainer: {
-    marginVertical: 25,
+  progressBarContainer: {
+    height: 10,
+    backgroundColor: '#EDF1F7',
+    borderRadius: 5,
+    overflow: 'hidden',
   },
-  voteButton: {
-    height: 50,
+  progressBar: {
+    height: '100%',
+    borderRadius: 5,
+  },
+  blockchainCard: {
     borderRadius: 10,
+    marginBottom: 15,
   },
-  resultsButton: {
-    height: 50,
-    borderRadius: 10,
-  },
-  securityInfo: {
-    marginTop: 20,
-    marginBottom: 30,
-  },
-  securityItem: {
+  blockchainStatus: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 15,
   },
-  securityText: {
-    marginLeft: 15,
-    fontSize: 14,
-    color: '#5E6C84',
+  blockchainStatusText: {
+    marginLeft: 10,
     flex: 1,
+    fontWeight: 'bold',
+  },
+  blockchainInfo: {
+    backgroundColor: '#F8F9FF',
+    padding: 15,
+    borderRadius: 5,
+  },
+  blockchainInfoTitle: {
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  blockchainInfoText: {
+    color: '#5E6C84',
+  },
+  noCandidatesContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
   },
 });

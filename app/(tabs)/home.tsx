@@ -1,5 +1,3 @@
-// app/(tabs)/home.tsx
-
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Card, Text, Button, Divider, useTheme, Icon } from '@rneui/themed';
@@ -57,6 +55,8 @@ export default function HomeScreen() {
     fetchData();
   }, []);
 
+  const isAdmin = userProfile?.isAdmin === true;
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
@@ -66,9 +66,19 @@ export default function HomeScreen() {
       }
     >
       <View style={styles.welcomeSection}>
-        <Text h4 style={{ color: theme.colors.black }}>
-          Welcome, {userProfile?.name || 'User'}
-        </Text>
+        <View style={styles.welcomeHeader}>
+          <Text h4 style={{ color: theme.colors.black }}>
+            Welcome, {userProfile?.name || 'User'}
+          </Text>
+          
+          {isAdmin && (
+            <View style={[styles.adminBadge, { backgroundColor: theme.colors.primary }]}>
+              <Ionicons name="shield-outline" size={14} color="white" />
+              <Text style={styles.adminBadgeText}>Admin</Text>
+            </View>
+          )}
+        </View>
+        
         <Text style={{ color: theme.colors.grey4, marginTop: 5 }}>
           Welcome to the blockchain-based voting system
         </Text>
@@ -118,6 +128,33 @@ export default function HomeScreen() {
         </View>
       </Card>
 
+      {isAdmin && (
+        <Card containerStyle={[styles.adminCard, { backgroundColor: theme.colors.primary }]}>
+          <View style={styles.adminCardContent}>
+            <View>
+              <Text style={styles.adminCardTitle}>Admin Dashboard</Text>
+              <Text style={styles.adminCardDescription}>
+                Manage elections and view election results
+              </Text>
+            </View>
+            <Button
+              title="Go to Admin"
+              onPress={() => router.push('/(tabs)/admin')}
+              buttonStyle={[styles.adminButton, { backgroundColor: 'white' }]}
+              titleStyle={{ color: theme.colors.primary }}
+              icon={
+                <Ionicons
+                  name="settings-outline"
+                  size={20}
+                  color={theme.colors.primary}
+                  style={{ marginRight: 10 }}
+                />
+              }
+            />
+          </View>
+        </Card>
+      )}
+
       <View style={styles.sectionHeader}>
         <Text h4 style={{ color: theme.colors.black }}>
           Active Elections
@@ -156,40 +193,82 @@ export default function HomeScreen() {
               </View>
             </View>
             
-            <Button
-              title={
-                election.voters.includes(user?.uid || '')
-                  ? "You already voted"
-                  : "Vote Now"
-              }
-              disabled={election.voters.includes(user?.uid || '')}
-              onPress={() => router.push(`/election/${election.id}`)}
-              buttonStyle={[
-                styles.voteButton,
-                {
-                  backgroundColor: election.voters.includes(user?.uid || '')
-                    ? theme.colors.grey2
-                    : theme.colors.primary,
-                },
-              ]}
-              icon={
-                election.voters.includes(user?.uid || '') ? (
+            {isAdmin ? (
+              <Button
+                title="View as Admin"
+                onPress={() => router.push(`/election/${election.id}`)}
+                buttonStyle={[
+                  styles.voteButton,
+                  { backgroundColor: theme.colors.secondary }
+                ]}
+                icon={
                   <Ionicons
-                    name="checkmark-circle"
+                    name="eye-outline"
                     size={20}
                     color="white"
                     style={{ marginRight: 10 }}
                   />
-                ) : (
+                }
+              />
+            ) : (
+              <Button
+                title={
+                  election.voters.includes(user?.uid || '')
+                    ? "You already voted"
+                    : "Vote Now"
+                }
+                disabled={election.voters.includes(user?.uid || '')}
+                onPress={() => router.push(`/election/${election.id}`)}
+                buttonStyle={[
+                  styles.voteButton,
+                  {
+                    backgroundColor: election.voters.includes(user?.uid || '')
+                      ? theme.colors.grey2
+                      : theme.colors.primary,
+                  },
+                ]}
+                icon={
+                  election.voters.includes(user?.uid || '') ? (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={20}
+                      color="white"
+                      style={{ marginRight: 10 }}
+                    />
+                  ) : (
+                    <Ionicons
+                      name="checkbox-outline"
+                      size={20}
+                      color="white"
+                      style={{ marginRight: 10 }}
+                    />
+                  )
+                }
+              />
+            )}
+            
+            {(election.voters.includes(user?.uid || '') || isAdmin) && (
+              <Button
+                title="View Results"
+                type="outline"
+                onPress={() => router.push(`/election/${election.id}/results`)}
+                buttonStyle={{
+                  borderColor: theme.colors.secondary,
+                  borderWidth: 2,
+                  borderRadius: 10,
+                  marginTop: 10,
+                }}
+                titleStyle={{ color: theme.colors.secondary }}
+                icon={
                   <Ionicons
-                    name="checkbox-outline"
+                    name="stats-chart-outline"
                     size={20}
-                    color="white"
+                    color={theme.colors.secondary}
                     style={{ marginRight: 10 }}
                   />
-                )
-              }
-            />
+                }
+              />
+            )}
           </Card>
         ))
       ) : (
@@ -272,6 +351,48 @@ const styles = StyleSheet.create({
   welcomeSection: {
     marginBottom: 20,
   },
+  welcomeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  adminBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 15,
+  },
+  adminBadgeText: {
+    color: 'white',
+    marginLeft: 5,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  adminCard: {
+    borderRadius: 15,
+    marginVertical: 15,
+    padding: 15,
+  },
+  adminCardContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  adminCardTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  adminCardDescription: {
+    color: 'white',
+    opacity: 0.9,
+  },
+  adminButton: {
+    borderRadius: 10,
+    paddingHorizontal: 15,
+  },
   statusCard: {
     borderRadius: 15,
     marginVertical: 15,
@@ -321,6 +442,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     textAlign: 'left',
+    color:'#000',
   },
   cardDescription: {
     marginBottom: 15,
