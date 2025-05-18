@@ -34,7 +34,7 @@ export default function HomeScreen() {
       if (elections && !error) {
         setActiveElections(elections);
       }
-      
+
       // Verify blockchain integrity
       const status = await verifyBlockchain();
       setBlockchainStatus(status);
@@ -70,7 +70,7 @@ export default function HomeScreen() {
           <Text h4 style={{ color: theme.colors.black }}>
             Welcome, {userProfile?.name || 'User'}
           </Text>
-          
+
           {isAdmin && (
             <View style={[styles.adminBadge, { backgroundColor: theme.colors.primary }]}>
               <Ionicons name="shield-outline" size={14} color="white" />
@@ -78,7 +78,7 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
-        
+
         <Text style={{ color: theme.colors.grey4, marginTop: 5 }}>
           Welcome to the blockchain-based voting system
         </Text>
@@ -97,9 +97,9 @@ export default function HomeScreen() {
               {blockchainStatus.valid ? "Valid" : "Invalid"}
             </Text>
           </View>
-          
+
           <View style={styles.statusDivider} />
-          
+
           <View style={styles.statusItem}>
             <Ionicons
               name="layers-outline"
@@ -111,9 +111,9 @@ export default function HomeScreen() {
               {blockchainStatus.blockCount}
             </Text>
           </View>
-          
+
           <View style={styles.statusDivider} />
-          
+
           <View style={styles.statusItem}>
             <Ionicons
               name="people-outline"
@@ -192,7 +192,7 @@ export default function HomeScreen() {
                 </Text>
               </View>
             </View>
-            
+
             {isAdmin ? (
               <Button
                 title="View as Admin"
@@ -246,7 +246,7 @@ export default function HomeScreen() {
                 }
               />
             )}
-            
+
             {(election.voters.includes(user?.uid || '') || isAdmin) && (
               <Button
                 title="View Results"
@@ -442,7 +442,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     textAlign: 'left',
-    color:'#000',
+    color: '#000',
   },
   cardDescription: {
     marginBottom: 15,
